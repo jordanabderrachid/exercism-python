@@ -1,14 +1,19 @@
-from abc import ABC, abstractmethod
 from enum import Enum
-from typing import List
-import re
+from typing import List, Dict
+from abc import ABC, abstractmethod
+
+
+class Category(ABC):
+    @abstractmethod
+    def value() -> int:
+        pass
 
 
 class Suit(Enum):
-    CLUB = "C"
     DIAMOND = "D"
     SPADE = "S"
-    HEART = "H"
+    CLUB = "C"
+    HEARTH = "H"
 
 
 class Kind(Enum):
@@ -21,193 +26,231 @@ class Kind(Enum):
     EIGHT = "8"
     NINE = "9"
     TEN = "10"
-    JACK = "J"  # 11
-    QUEEN = "Q"  # 12
-    KING = "K"  # 13
-    ACE = "A"  # 14
+    JACK = "J"
+    QUEEN = "Q"
+    KING = "K"
+    ACE = "A"
 
 
 def kind_rank(k: Kind) -> int:
-    if k == Kind.ACE:
-        return 14
+    kinds = [
+        Kind.TWO,
+        Kind.THREE,
+        Kind.FOUR,
+        Kind.FIVE,
+        Kind.SIX,
+        Kind.SEVEN,
+        Kind.EIGHT,
+        Kind.NINE,
+        Kind.TEN,
+        Kind.JACK,
+        Kind.QUEEN,
+        Kind.KING,
+        Kind.ACE,
+    ]
 
-    if k == Kind.KING:
-        return 13
-
-    if k == Kind.QUEEN:
-        return 12
-
-    if k == Kind.JACK:
-        return 11
-
-    return int(k.value)
-
-
-class RankType(Enum):
-    STRAIGHT_FLUSH = 10
-    FOUR_OF_A_KIND = 9
-    FULL_HOUSE = 8
-    FLUSH = 7
-    STRAIGHT = 6
-    THREE_OF_A_KIND = 5
-    TWO_PAIR = 4
-    ONE_PAIR = 3
-    HIGH_CARD = 2
-
-
-class Rank(ABC):
-    @abstractmethod
-    def rank_type(self) -> RankType:
-        pass
-
-    @abstractmethod
-    def rank_value(self) -> int:
-        pass
+    return kinds.index(k) + 1
 
 
 class Card:
-    def __init__(self, serialized):
-        match = re.match(r"^(.{1,2}){1}(C|D|S|H){1}$", serialized)
-        self.kind = Kind(match.group(1))
-        self.suit = Suit(match.group(2))
+    def __init__(self, repr: str) -> None:
+        self.kind_repr = repr[0 : len(repr) - 1]
+        self.kind = Kind(self.kind_repr)
+        self.suit = Suit(repr[len(repr) - 1])
+
+
+straight = "2345A2345678910JQKA"
+
+
+class StraightFlush(Category):
+    def __init__(self, straight_repr: str) -> None:
+        super().__init__()
+        self.straight_repr = straight_repr
+
+    def value(self) -> int:
+        return 4 * (10**6) + straight.find(self.straight_repr)
+
+
+class FourOfAKind(Category):
+    def __init__(self, quads: Kind, kicker: Kind) -> None:
+        super().__init__()
+        self.quads = quads
+        self.kicker = kicker
+
+    def value(self) -> int:
+        return 3 * (10**6) + 100 * kind_rank(self.quads) + kind_rank(self.kicker)
+
+
+class FullHouse(Category):
+    def __init__(self, triplet: Kind, pair: Kind) -> None:
+        super().__init__()
+        self.triplet = triplet
+        self.pair = pair
+
+    def value(self) -> int:
+        return 2 * (10**6) + 100 * kind_rank(self.triplet) + kind_rank(self.pair)
+
+
+class Flush(Category):
+    def __init__(self, cards: List[Card]) -> None:
+        super().__init__()
+        self.cards = cards
+
+    def value(self) -> int:
+        v = 0
+        for i, c in enumerate(self.cards):
+            v = v + kind_rank(c.kind) * (10**i)
+        return 10**6 + v
+
+
+class Straight(Category):
+    def __init__(self, straight_repr: str) -> None:
+        super().__init__()
+        self.straight_repr = straight_repr
+
+    def value(self) -> int:
+        return 3000 + straight.find(self.straight_repr)
+
+
+class ThreeOfAKind(Category):
+    def __init__(self, k: Kind) -> None:
+        super().__init__()
+        self.k = k
+
+    def value(self) -> int:
+        return 2000 + kind_rank(self.k)
+
+
+class TwoPair(Category):
+    def __init__(self, first: Kind, second: Kind) -> None:
+        super().__init__()
+        self.first = kind_rank(first)
+        self.second = kind_rank(second)
+
+    def value(self) -> int:
+        return (
+            1000 + 100 * max([self.first, self.second]) + min([self.first, self.second])
+        )
+
+
+class Pair(Category):
+    def __init__(self, k: Kind) -> None:
+        super().__init__()
+        self.k = k
+
+    def value(self) -> int:
+        return 100 + kind_rank(self.k)
+
+
+class HighCard(Category):
+    def __init__(self, c: Card):
+        super().__init__()
+        self.v = kind_rank(c.kind)
+
+    def value(self) -> int:
+        return self.v
 
 
 class Hand:
-    def __init__(self, cards):
+    def __init__(self, repr: str) -> None:
+        cards: List[Card] = list()
+        self.repr = repr
+        for card_repr in repr.split(" "):
+            cards.append(Card(card_repr))
+
+        cards.sort(key=lambda c: kind_rank(c.kind))
         self.cards = cards
-        self.suits = self._suits(cards)
-        self.kinds = self._kinds(cards)
 
-    def _suits(self, cards):
-        s = {}
-        for c in cards:
-            count = s.get(c.suit)
-            if count is None:
-                s[c.suit] = 1
+    def categories(self) -> List[Category]:
+        categories = list()
+        kinds: Dict[Kind, int] = dict()
+        suits: Dict[Suit, int] = dict()
+        for c in self.cards:
+            categories.append(HighCard(c))
+            kind_count = kinds.get(c.kind)
+            if kind_count is None:
+                kinds[c.kind] = 1
             else:
-                s[c.suit] = count + 1
-        return s
+                kinds[c.kind] = kind_count + 1
 
-    def _kinds(self, cards):
-        k = {}
-        for c in cards:
-            count = k.get(c.kind)
-            if count is None:
-                k[c.kind] = 1
+            suit_count = suits.get(c.suit)
+            if suit_count is None:
+                suits[c.suit] = 1
             else:
-                k[c.kind] = count + 1
-        return k
+                suits[c.suit] = suit_count + 1
 
-    def ranks(self) -> List[Rank]:
-        r = []
+        ones = list(filter(lambda t: t[1] == 1, kinds.items()))
+        fours = list(filter(lambda t: t[1] == 4, kinds.items()))
+        threes = list(filter(lambda t: t[1] == 3, kinds.items()))
+        for kind, _ in threes:
+            categories.append(ThreeOfAKind(kind))
 
-        pair_kinds = list()
-        for kind, count in self.kinds.items():
-            if count == 2:
-                pair_kinds.append(kind)
-            if count == 3:
-                r.append(ThreeOfAKind(kind))
+        pairs = list(filter(lambda t: t[1] == 2, kinds.items()))
+        for kind, _ in pairs:
+            categories.append(Pair(kind))
 
-        if len(pair_kinds) == 2:
-            r.append(TwoPair(pair_kinds[0], pair_kinds[1]))
+        if len(pairs) == 2:
+            categories.append(TwoPair(pairs[0][0], pairs[1][0]))
 
-        for kind in pair_kinds:
-            r.append(OnePair(kind))
+        flush = list(filter(lambda t: t[1] == 5, suits.items()))
+        if len(flush) > 0:
+            categories.append(Flush(self.cards))
 
-        r += sorted([HighCard(c) for c in self.cards], key=lambda c: -c.rank_value())
-        return r
+        all_kinds_repr = "".join([c.kind_repr for c in self.cards])
+        if all_kinds_repr in straight:
+            categories.append(Straight(all_kinds_repr))
 
-    def highest_rank_type(self) -> Rank:
-        return sorted(self.ranks(), key=lambda r: -r.rank_type().value)[0]
+            if len(flush) > 0:
+                categories.append(StraightFlush(all_kinds_repr))
 
-    def serialize(self) -> str:
-        return " ".join([f"{c.kind.value}{c.suit.value}" for c in self.cards])
+        if len(threes) > 0 and len(pairs) > 0:
+            categories.append(FullHouse(threes[0][0], pairs[0][0]))
 
+        if len(fours) > 0:
+            categories.append(FourOfAKind(fours[0][0], ones[0][0]))
 
-class HighCard(Rank):
-    def __init__(self, card):
-        self.card_kind_rank = kind_rank(card.kind)
-
-    def rank_type(self) -> RankType:
-        return RankType.HIGH_CARD
-
-    def rank_value(self) -> int:
-        return self.card_kind_rank
+        return categories
 
 
-class OnePair(Rank):
-    def __init__(self, kind):
-        self.card_kind_rank = kind_rank(kind)
-
-    def rank_type(self) -> RankType:
-        return RankType.ONE_PAIR
-
-    def rank_value(self) -> int:
-        return self.card_kind_rank
+class BestHandResult(Enum):
+    LEFT = "L"
+    RIGHT = "R"
+    BOTH = "B"
 
 
-class TwoPair(Rank):
-    def __init__(self, first_kind, second_kind):
-        self.card_kind_rank = max(kind_rank(first_kind), kind_rank(second_kind))
+def best_hand(left: Hand, right: Hand) -> BestHandResult:
+    left_values = [c.value() for c in left.categories()]
+    right_values = [c.value() for c in right.categories()]
 
-    def rank_type(self) -> RankType:
-        return RankType.TWO_PAIR
+    while len(left_values) > 0:
+        max_l = max(left_values)
+        max_r = max(right_values)
 
-    def rank_value(self) -> int:
-        return self.card_kind_rank
+        if max_l > max_r:
+            return BestHandResult.LEFT
 
+        if max_r > max_l:
+            return BestHandResult.RIGHT
 
-class ThreeOfAKind(Rank):
-    def __init__(self, kind):
-        self.card_kind_rank = kind
+        left_values.remove(max_l)
+        right_values.remove(max_r)
 
-    def rank_type(self) -> RankType:
-        return RankType.THREE_OF_A_KIND
-
-    def rank_value(self) -> int:
-        return self.card_kind_rank
+    return BestHandResult.BOTH
 
 
 def best_hands(hands_str):
-    hands: List[Hand] = list()
-    for h in hands_str:
-        cards = list()
-        for c_str in h.split(" "):
-            cards.append(Card(c_str))
-        hands.append(Hand(cards))
+    best: List[Hand] = list()
+    for hand_repr in hands_str:
+        h = Hand(hand_repr)
+        if len(best) == 0:
+            best.append(h)
+        else:
+            current_best = best[0]
+            best_hand_result = best_hand(current_best, h)
+            if best_hand_result == BestHandResult.BOTH:
+                best.append(h)
 
-    highest_rank_type_value = None
-    to_keep = []
-    for h in hands:
-        if highest_rank_type_value is None:
-            highest_rank_type_value = h.highest_rank_type().rank_type().value
-            to_keep = [h]
-        elif highest_rank_type_value == h.highest_rank_type().rank_type().value:
-            to_keep.append(h)
-        elif highest_rank_type_value < h.highest_rank_type().rank_type().value:
-            highest_rank_type_value = h.highest_rank_type().rank_type().value
-            to_keep = [h]
-    hands = to_keep
+            if best_hand_result == BestHandResult.RIGHT:
+                best = [h]
 
-    has_more_rank = True
-    rank_index = 0
-    while len(hands) > 1 and has_more_rank:
-        highest_rank_value = None
-        hands_to_keep = []
-        for h in hands:
-            rank = h.ranks()[rank_index]
-            r_v = rank.rank_value()
-            if highest_rank_value is None:
-                hands_to_keep = [h]
-                highest_rank_value = r_v
-            elif r_v == highest_rank_value:
-                hands_to_keep.append(h)
-            elif r_v > highest_rank_value:
-                hands_to_keep = [h]
-                highest_rank_value = r_v
-
-        hands = hands_to_keep
-        rank_index += 1
-        has_more_rank = rank_index < len(hands[0].ranks())
-
-    return [h.serialize() for h in hands]
+    return [b.repr for b in best]
